@@ -1,0 +1,132 @@
+version: '3.8'
+
+networks:
+  employee-network:
+    driver: bridge
+    name: employee-network
+
+volumes:
+  postgres_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+services:
+
+  # =========================================================================
+  # 1. PERSISTENCE LAYER (PostgreSQL)
+  # =========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: employee-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin_secure_pass
+      POSTGRES_DB: employee_shared_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - employee-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d employee_shared_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =========================================================================
+  # 2. IDENTITY AND ACCESS MANAGEMENT (Keycloak)
+  # =========================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.2
+    container_name: employee-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin_secure_pass
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    networks:
+      - employee-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # =========================================================================
+  # 3. MESSAGE BROKER (RabbitMQ)
+  # =========================================================================
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: employee-rabbitmq
+    ports:
+      - "5672:5672"     # AMQP protocol port for Spring Boot communication
+      - "15672:15672"   # Web Management UI Dashboard
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - employee-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =========================================================================
+  # 4. OBSERVABILITY: METRIC COLLECTION ENGINE (Prometheus)
+  # =========================================================================
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: employee-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - employee-network
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+
+  # =========================================================================
+  # 5. OBSERVABILITY: METRIC VISUALIZATION DASHBOARD (Grafana)
+  # =========================================================================
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: employee-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_secure_pass
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - employee-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
