@@ -1,43 +1,37 @@
-version: '3.8'
-
 networks:
   employee-network:
     driver: bridge
     name: employee-network
 
 volumes:
-  postgres_data:
-    driver: local
+  mysql_data:
   rabbitmq_data:
-    driver: local
   keycloak_data:
-    driver: local
   prometheus_data:
-    driver: local
   grafana_data:
-    driver: local
 
 services:
 
   # =========================================================================
-  # 1. PERSISTENCE LAYER (PostgreSQL)
+  # 1. PERSISTENCE LAYER (MySQL)
   # =========================================================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: employee-postgres
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin_secure_pass
-      POSTGRES_DB: employee_shared_db
+  mysql:
+    image: mysql:8.0
+    container_name: employee-mysql
     ports:
-      - "5432:5432"
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secure_pass
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin_secure_pass
+      MYSQL_DATABASE: employee_shared_db
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres-init:/docker-entrypoint-initdb.d
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
     networks:
       - employee-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d employee_shared_db"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_secure_pass"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -53,6 +47,10 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin_secure_pass
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/employee_shared_db
+      KC_DB_USERNAME: admin
+      KC_DB_PASSWORD: admin_secure_pass
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
     ports:
@@ -62,7 +60,7 @@ services:
     networks:
       - employee-network
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     restart: unless-stopped
 
@@ -73,8 +71,8 @@ services:
     image: rabbitmq:3.13-management-alpine
     container_name: employee-rabbitmq
     ports:
-      - "5672:5672"     # AMQP protocol port for Spring Boot communication
-      - "15672:15672"   # Web Management UI Dashboard
+      - "5672:5672"     # AMQP communication port
+      - "15672:15672"   # Management Dashboard Dashboard
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -103,16 +101,12 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
     networks:
       - employee-network
-    depends_on:
-      - rabbitmq
     restart: unless-stopped
 
   # =========================================================================
-  # 5. OBSERVABILITY: METRIC VISUALIZATION DASHBOARD (Grafana)
+  # 5. OBSERVABILITY: VISUALIZATION DASHBOARD (Grafana)
   # =========================================================================
   grafana:
     image: grafana/grafana:10.4.1

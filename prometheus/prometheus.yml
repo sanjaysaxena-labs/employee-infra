@@ -1,0 +1,35 @@
+global:
+  scrape_interval:     15s 
+  evaluation_interval: 15s 
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # =========================================================================
+  # SPRING BOOT APPLICATION INGESTION PIPELINES
+  # =========================================================================
+  # Since Spring Boot services run outside of Docker (on your host system) 
+  # during local development, we use 'host.docker.internal' to allow containers
+  # to safely talk back to your physical local machine network loopback.
+
+  - job_name: 'api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8081']
+
+  - job_name: 'employee-core-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8082']
+
+  - job_name: 'payroll-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8083']
+
+  - job_name: 'leave-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8084']
